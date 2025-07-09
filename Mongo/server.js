@@ -59,13 +59,14 @@ app.post("/products", async (req, res) => {
       categoryIds: categoryObjectIds,
     });
 
-    io.emit("product_created", {
-      _id: ack.insertedId,
-      name,
-      about,
-      price,
-      categoryIds: categoryObjectIds,
-    });
+    io.emit(
+      "chat message",
+      `Created : ${ack.insertedId},
+      ${name},
+      ${about},
+      ${price},
+      ${categoryObjectIds}`
+    );
   } else {
     res.status(400).send(result);
   }
