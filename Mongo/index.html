@@ -349,11 +349,38 @@
         showNotification('Déconnecté du serveur', 'error');
       });
 
-      // Écoute des messages Socket.IO pour les mises à jour en temps réel
+      // Écoute des événements Socket.IO pour les mises à jour en temps réel
+      socket.on('product:created', (product) => {
+        showNotification(`Nouveau produit créé: ${product.name}`, 'info');
+        products.push(product);
+        renderProducts();
+      });
+
+      socket.on('product:updated', (product) => {
+        showNotification(`Produit mis à jour: ${product.name}`, 'info');
+        const index = products.findIndex(p => p._id === product._id);
+        if (index !== -1) {
+          products[index] = product;
+          renderProducts();
+        }
+      });
+
+      socket.on('product:deleted', (data) => {
+        showNotification(`Produit supprimé: ${data.product ? data.product.name : 'Produit'}`, 'info');
+        products = products.filter(p => p._id !== data._id);
+        renderProducts();
+      });
+
+      socket.on('category:created', (category) => {
+        showNotification(`Nouvelle catégorie créée: ${category.name}`, 'info');
+        categories.push(category);
+        renderCategoryOptions();
+      });
+
+      // Garder l'ancien événement pour compatibilité
       socket.on('chat message', (msg) => {
         if (msg.includes('Created :')) {
-          showNotification('Nouveau produit créé par un autre utilisateur', 'info');
-          loadProducts();
+          // Déjà géré par product:created
         }
       });
 
@@ -387,20 +414,12 @@
 
       async function loadCategories() {
         try {
-          // Comme il n'y a pas de route GET pour les catégories, on les récupère depuis les produits
-          await loadProducts();
-          const categorySet = new Set();
-          products.forEach(product => {
-            if (product.categories) {
-              product.categories.forEach(cat => {
-                categorySet.add(JSON.stringify(cat));
-              });
-            }
-          });
-          categories = Array.from(categorySet).map(cat => JSON.parse(cat));
+          const response = await fetch('/categories');
+          categories = await response.json();
           renderCategoryOptions();
         } catch (error) {
           console.error('Erreur lors du chargement des catégories:', error);
+          showNotification('Erreur lors du chargement des catégories', 'error');
         }
       }
 

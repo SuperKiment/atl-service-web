@@ -35,10 +35,25 @@ const CategorySchema = z.object({
 });
 const CreateCategorySchema = CategorySchema.omit({ _id: true });
 
-// Plus besoin de route spécifique pour "/", express.static s'en occupe
-// app.get("/", (req, res) => {
-//   res.sendFile(path.join(__dirname2, "index.html"));
-// });
+// Fonction helper pour récupérer un produit avec ses catégories
+async function getProductWithCategories(productId) {
+  const result = await db
+    .collection("products")
+    .aggregate([
+      { $match: { _id: new ObjectId(productId) } },
+      {
+        $lookup: {
+          from: "categories",
+          localField: "categoryIds",
+          foreignField: "_id",
+          as: "categories",
+        },
+      },
+    ])
+    .toArray();
+  
+  return result[0] || null;
+}
 
 app.post("/products", async (req, res) => {
   const result = await CreateProductSchema.safeParse(req.body);
@@ -51,21 +66,26 @@ app.post("/products", async (req, res) => {
       .collection("products")
       .insertOne({ name, about, price, categoryIds: categoryObjectIds });
 
-    res.send({
+    const createdProduct = {
       _id: ack.insertedId,
       name,
       about,
       price,
       categoryIds: categoryObjectIds,
-    });
+    };
 
+    res.send(createdProduct);
+
+    // Récupérer le produit avec ses catégories pour l'événement
+    const productWithCategories = await getProductWithCategories(ack.insertedId);
+    
+    // Émettre l'événement de création
+    io.emit('product:created', productWithCategories);
+    
+    // Garder l'ancien message pour compatibilité
     io.emit(
       "chat message",
-      `Created : ${ack.insertedId},
-      ${name},
-      ${about},
-      ${price},
-      ${categoryObjectIds}`
+      `Created : ${ack.insertedId}, ${name}, ${about}, ${price}, ${categoryObjectIds}`
     );
   } else {
     res.status(400).send(result);
@@ -94,10 +114,22 @@ app.get("/products", async (req, res) => {
 app.delete("/products/:id", async (req, res) => {
   const { id } = req.params;
   const objectId = new ObjectId(id);
+  
+  // Récupérer le produit avant suppression pour l'événement
+  const productToDelete = await getProductWithCategories(id);
+  
   const result = await db
     .collection("products")
     .findOneAndDelete({ _id: objectId }, { returnDocument: "after" });
-  res.send(result || { message: "Pas trouvé" });
+  
+  if (result.value || productToDelete) {
+    // Émettre l'événement de suppression
+    io.emit('product:deleted', { _id: id, product: productToDelete });
+    
+    res.send(result.value || { message: "Produit supprimé" });
+  } else {
+    res.send({ message: "Pas trouvé" });
+  }
 });
 
 app.patch("/products/:id", async (req, res) => {
@@ -122,11 +154,20 @@ app.patch("/products/:id", async (req, res) => {
         },
       }
     );
-    res.send({
+    
+    const responseData = {
       _id: objectId,
       ...updates,
       modifiedCount: ack.modifiedCount,
-    });
+    };
+    
+    res.send(responseData);
+    
+    // Récupérer le produit mis à jour avec ses catégories pour l'événement
+    const updatedProduct = await getProductWithCategories(id);
+    
+    // Émettre l'événement de mise à jour
+    io.emit('product:updated', updatedProduct);
   } else {
     res.status(400).send({ error: "No valid fields to update" });
   }
@@ -150,14 +191,23 @@ app.put("/products/:id", async (req, res) => {
         categoryIds: categoryObjectIds,
       }
     );
-    res.send({
+    
+    const responseData = {
       _id: objectId,
       name,
       about,
       price,
       categoryIds: categoryObjectIds,
       modifiedCount: ack.modifiedCount,
-    });
+    };
+    
+    res.send(responseData);
+    
+    // Récupérer le produit mis à jour avec ses catégories pour l'événement
+    const updatedProduct = await getProductWithCategories(id);
+    
+    // Émettre l'événement de mise à jour
+    io.emit('product:updated', updatedProduct);
   } else {
     res.status(400).send(result);
   }
@@ -171,10 +221,21 @@ app.post("/categories", async (req, res) => {
 
     const ack = await db.collection("categories").insertOne({ name });
 
-    res.send({ _id: ack.insertedId, name });
+    const createdCategory = { _id: ack.insertedId, name };
+    
+    res.send(createdCategory);
+    
+    // Émettre l'événement de création de catégorie
+    io.emit('category:created', createdCategory);
   } else {
     res.status(400).send(result);
   }
+});
+
+// Route pour récupérer les catégories
+app.get("/categories", async (req, res) => {
+  const result = await db.collection("categories").find({}).toArray();
+  res.send(result);
 });
 
 //====================IO
